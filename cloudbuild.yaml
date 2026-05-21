@@ -12,13 +12,13 @@ steps:
     echo "Ensuring Artifact Registry repo ${_REPOSITORY} exists in ${_REGION}..."
     gcloud artifacts repositories create "${_REPOSITORY}" --repository-format=docker --location="${_REGION}" --quiet || echo "artifact repo may already exist"
 
-  # 1) Build full project (parent + all services)
+  # 2) Build full project (parent + all services)
 - id: "Build Maven project"
   name: 'maven:3.9.9-eclipse-temurin-21'
   entrypoint: 'mvn'
   args: ['clean', 'install', '-DskipTests']
 
-  # 2) Build Docker image (only copy JAR, not rebuild Maven)
+  # 3) Build Docker image (only copy JAR, not rebuild Maven)
 - id: "build-order"
   name: 'gcr.io/cloud-builders/docker'
   args: [
@@ -29,7 +29,7 @@ steps:
     '.'   #  IMPORTANT → project root context
   ]
 
-  # 3) Push image
+  # 4) Push image
 - id: "push-order"
   name: 'gcr.io/cloud-builders/docker'
   args: [
@@ -37,24 +37,45 @@ steps:
     '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/order-service:$SHORT_SHA'
   ]
 
-
-- id: "build-and-push-fraud"
+  # 5) Build Docker image (only copy JAR, not rebuild Maven)
+- id: "build-fraud"
   name: 'gcr.io/cloud-builders/docker'
-  args: ['build','-t','${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/fraud-service:$SHORT_SHA','./fraud-service']
+  args: [
+    'build',
+    '-t',
+    '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/fraud-service:$SHORT_SHA',
+    '-f', 'fraud-service/Dockerfile',
+    '.'   #  IMPORTANT → project root context
+  ]
 
+  # 6) Push image
 - id: "push-fraud"
   name: 'gcr.io/cloud-builders/docker'
-  args: ['push','${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/fraud-service:$SHORT_SHA']
+  args: [
+    'push',
+    '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/fraud-service:$SHORT_SHA'
+  ]
 
-- id: "build-and-push-payment"
+  # 7) Build Docker image (only copy JAR, not rebuild Maven)
+- id: "build-fraud"
   name: 'gcr.io/cloud-builders/docker'
-  args: ['build','-t','${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/payment-service:$SHORT_SHA','./payment-service']
+  args: [
+    'build',
+    '-t',
+    '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/payment-service:$SHORT_SHA',
+    '-f', 'payment-service/Dockerfile',
+    '.'   #  IMPORTANT → project root context
+  ]
 
-- id: "push-payment"
+  # 8) Push image
+- id: "push-fraud"
   name: 'gcr.io/cloud-builders/docker'
-  args: ['push','${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/payment-service:$SHORT_SHA']
+  args: [
+    'push',
+    '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/payment-service:$SHORT_SHA'
+  ]
 
-# 3) Create (idempotent) GKE cluster
+# 9) Create (idempotent) GKE cluster
 - id: "create-gke-cluster"
   name: 'gcr.io/cloud-builders/gcloud'
   entrypoint: 'bash'
@@ -67,12 +88,12 @@ steps:
     gcloud container clusters describe "${_CLUSTER_NAME}" --zone "${_CLUSTER_ZONE}" >/dev/null 2>&1 || \
       gcloud container clusters create "${_CLUSTER_NAME}" --zone "${_CLUSTER_ZONE}" --num-nodes=3 --quiet
 
-# 4) Get cluster credentials
+# 10) Get cluster credentials
 - id: "get-credentials"
   name: 'gcr.io/cloud-builders/gcloud'
   args: ['container','clusters','get-credentials','${_CLUSTER_NAME}','--zone','${_CLUSTER_ZONE}']
 
-# 5) Render k8s template and deploy to GKE
+# 11) Render k8s template and deploy to GKE
 - id: "render-and-apply-k8s"
   name: 'gcr.io/cloud-builders/gcloud'
   entrypoint: 'bash'
