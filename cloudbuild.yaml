@@ -1,0 +1,237 @@
+options:
+  substitutionOption: ALLOW_LOOSE
+
+substitutions:
+  _CLUSTER_NAME: "cb-cluster"
+  _CLUSTER_ZONE: "us-central1-a"
+  _DB_INSTANCE: "cb-sql-instance"
+  _DB_REGION: "us-central1"
+  _DB_NAME: "payments"
+  _DB_USER: "postgres"
+  _DB_PASS: "123"
+
+steps:
+# 1) Build images
+- id: "Build order-service image"
+  name: 'gcr.io/cloud-builders/docker'
+  args: ['build', '-t', 'gcr.io/$PROJECT_ID/order-service:$SHORT_SHA', './order-service']
+
+- id: "Push order-service image"
+  name: 'gcr.io/cloud-builders/docker'
+  args: ['push', 'gcr.io/$PROJECT_ID/order-service:$SHORT_SHA']
+
+- id: "Build fraud-service image"
+  name: 'gcr.io/cloud-builders/docker'
+  args: ['build', '-t', 'gcr.io/$PROJECT_ID/fraud-service:$SHORT_SHA', './fraud-service']
+
+- id: "Push fraud-service image"
+  name: 'gcr.io/cloud-builders/docker'
+  args: ['push', 'gcr.io/$PROJECT_ID/fraud-service:$SHORT_SHA']
+
+- id: "Build payment-service image"
+  name: 'gcr.io/cloud-builders/docker'
+  args: ['build', '-t', 'gcr.io/$PROJECT_ID/payment-service:$SHORT_SHA', './payment-service']
+
+- id: "Push payment-service image"
+  name: 'gcr.io/cloud-builders/docker'
+  args: ['push', 'gcr.io/$PROJECT_ID/payment-service:$SHORT_SHA']
+
+# 2) Create GKE cluster
+- id: "Create GKE cluster"
+  name: 'gcr.io/cloud-builders/gcloud'
+  entrypoint: 'bash'
+  args:
+  - '-c'
+  - |
+    set -e
+    echo "Creating GKE cluster ${_CLUSTER_NAME} in zone ${_CLUSTER_ZONE}..."
+    gcloud container clusters create "${_CLUSTER_NAME}" --zone "${_CLUSTER_ZONE}" --num-nodes=3 --quiet || true
+
+# 3) Get credentials for kubectl
+- id: "Get GKE credentials"
+  name: 'gcr.io/cloud-builders/gcloud'
+  args: ['container','clusters','get-credentials','${_CLUSTER_NAME}','--zone','${_CLUSTER_ZONE}']
+
+# 4) Create Cloud SQL Postgres instance (idempotent)
+- id: "Create Cloud SQL (Postgres)"
+  name: 'gcr.io/cloud-builders/gcloud'
+  entrypoint: 'bash'
+  args:
+  - '-c'
+  - |
+    set -e
+    echo "Creating Cloud SQL instance ${_DB_INSTANCE} (region ${_DB_REGION})..."
+    gcloud sql instances create "${_DB_INSTANCE}" --database-version=POSTGRES_14 --tier=db-f1-micro --region="${_DB_REGION}" --quiet || echo "instance may already exist"
+    echo "Setting DB user/password and creating database"
+    gcloud sql users set-password "${_DB_USER}" --instance="${_DB_INSTANCE}" --password="${_DB_PASS}" --quiet || true
+    gcloud sql databases create "${_DB_NAME}" --instance="${_DB_INSTANCE}" --quiet || echo "database may already exist"
+
+# 5) Get Cloud SQL IP, create k8s secret, and generate + apply manifests
+- id: "Deploy to GKE (manifests + secrets)"
+  name: 'gcr.io/cloud-builders/gcloud'
+  entrypoint: 'bash'
+  args:
+  - '-c'
+  - |
+    set -e
+    echo "Resolving Cloud SQL IP..."
+    DB_IP=$(gcloud sql instances describe "${_DB_INSTANCE}" --format='value(ipAddresses[0].ipAddress)')
+    if [ -z "$DB_IP" ]; then
+      echo "Could not determine DB IP. Ensure Cloud SQL has a public IP or adjust connectivity setup." >&2
+      exit 1
+    fi
+    echo "Cloud SQL IP: $DB_IP"
+
+    # create k8s secret with DB connection details
+    kubectl create secret generic db-credentials \
+      --from-literal=DB_HOST="$DB_IP" \
+      --from-literal=DB_NAME="${_DB_NAME}" \
+      --from-literal=DB_USER="${_DB_USER}" \
+      --from-literal=DB_PASS="${_DB_PASS}" \
+      --dry-run=client -o yaml | kubectl apply -f -
+
+    # Generate Kubernetes manifests embedding the pushed image tags and DB IP
+    cat > k8s-deploy.yaml <<EOF
+apiVersion: v1
+kind: Service
+metadata:
+  name: fraud-service
+spec:
+  selector:
+    app: fraud-service
+  ports:
+    - protocol: TCP
+      port: 8081
+      targetPort: 8081
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fraud-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: fraud-service
+  template:
+    metadata:
+      labels:
+        app: fraud-service
+    spec:
+      containers:
+        - name: fraud-service
+          image: gcr.io/$PROJECT_ID/fraud-service:$SHORT_SHA
+          ports:
+            - containerPort: 8081
+          env:
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:postgresql://$DB_IP:5432/${_DB_NAME}"
+            - name: SPRING_DATASOURCE_USERNAME
+              value: "${_DB_USER}"
+            - name: SPRING_DATASOURCE_PASSWORD
+              value: "${_DB_PASS}"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment-service
+spec:
+  selector:
+    app: payment-service
+  ports:
+    - protocol: TCP
+      port: 8082
+      targetPort: 8082
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: payment-service
+  template:
+    metadata:
+      labels:
+        app: payment-service
+    spec:
+      containers:
+        - name: payment-service
+          image: gcr.io/$PROJECT_ID/payment-service:$SHORT_SHA
+          ports:
+            - containerPort: 8082
+          env:
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:postgresql://$DB_IP:5432/${_DB_NAME}"
+            - name: SPRING_DATASOURCE_USERNAME
+              value: "${_DB_USER}"
+            - name: SPRING_DATASOURCE_PASSWORD
+              value: "${_DB_PASS}"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-service
+spec:
+  type: LoadBalancer
+  selector:
+    app: order-service
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: order-service
+  template:
+    metadata:
+      labels:
+        app: order-service
+    spec:
+      containers:
+        - name: order-service
+          image: gcr.io/$PROJECT_ID/order-service:$SHORT_SHA
+          ports:
+            - containerPort: 8080
+          env:
+            - name: SERVICES_FRAUD
+              value: "http://fraud-service:8081"
+            - name: SERVICES_PAYMENT
+              value: "http://payment-service:8082"
+EOF
+
+    echo "Applying Kubernetes manifests..."
+    kubectl apply -f k8s-deploy.yaml
+
+# 6) Optional: wait for order-service External IP
+- id: "Wait for order-service LB"
+  name: 'gcr.io/cloud-builders/kubectl'
+  entrypoint: 'bash'
+  args:
+  - '-c'
+  - |
+    echo "Waiting for external IP for order-service (this may take a minute)..."
+    for i in {1..30}; do
+      IP=$(kubectl get svc order-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
+      if [ -n "$IP" ]; then
+        echo "Order service available at http://$IP"
+        break
+      fi
+      sleep 5
+    done
+
+images:
+- 'gcr.io/$PROJECT_ID/order-service:$SHORT_SHA'
+- 'gcr.io/$PROJECT_ID/fraud-service:$SHORT_SHA'
+- 'gcr.io/$PROJECT_ID/payment-service:$SHORT_SHA'
+
+# Not using artifacts; this pipeline assumes Cloud Build has appropriate IAM to create GKE, Cloud SQL and deploy.
