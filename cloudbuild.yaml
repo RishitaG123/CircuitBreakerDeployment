@@ -1,182 +1,133 @@
 # Minimal Cloud Build pipeline: build images, push to Artifact Registry, create GKE cluster, deploy to GKE
 steps:
 
-# 1) Ensure Artifact Registry repository exists (idempotent)
-- id: "create-artifact-repo"
-  name: 'gcr.io/cloud-builders/gcloud'
-  entrypoint: 'bash'
-  args:
-  - '-c'
-  - |
-    set -e
-    echo "Ensuring Artifact Registry repo ${_REPOSITORY} exists in ${_REGION}..."
-    gcloud artifacts repositories create "${_REPOSITORY}" --repository-format=docker --location="${_REGION}" --quiet || echo "artifact repo may already exist"
+  # 1) Ensure Artifact Registry repository exists (idempotent)
+  - id: "create-artifact-repo"
+    name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -e
+        echo "Ensuring Artifact Registry repo ${_REPOSITORY} exists in ${_REGION}..."
+        gcloud artifacts repositories create "${_REPOSITORY}" --repository-format=docker --location="${_REGION}" --quiet || echo "artifact repo may already exist"
 
-  # 2) Build full project (parent + all services)
-- id: "Build Maven project"
-  name: 'maven:3.9.9-eclipse-temurin-21'
-  entrypoint: 'mvn'
-  args: ['clean', 'install', '-DskipTests']
+    # 2) Build full project (parent + all services)
+  - id: "Build Maven project"
+    name: 'maven:3.9.9-eclipse-temurin-21'
+    entrypoint: 'mvn'
+    args: ['clean', 'install', '-DskipTests']
 
-  # 3) Build Docker image (only copy JAR, not rebuild Maven)
-- id: "build-order"
-  name: 'gcr.io/cloud-builders/docker'
-  args: [
-    'build',
-    '-t',
-    '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/order-service:$SHORT_SHA',
-    '-f', 'order-service/Dockerfile',
-    '.'   #  IMPORTANT → project root context
-  ]
+    # 3) Build Docker image (only copy JAR, not rebuild Maven)
+  - id: "build-order"
+    name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'build',
+      '-t',
+      '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/order-service:$SHORT_SHA',
+      '-f', 'order-service/Dockerfile',
+      '.'   #  IMPORTANT → project root context
+    ]
 
-  # 4) Push image
-- id: "push-order"
-  name: 'gcr.io/cloud-builders/docker'
-  args: [
-    'push',
-    '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/order-service:$SHORT_SHA'
-  ]
+    # 4) Push image
+  - id: "push-order"
+    name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'push',
+      '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/order-service:$SHORT_SHA'
+    ]
 
-  # 5) Build Docker image (only copy JAR, not rebuild Maven)
-- id: "build-fraud"
-  name: 'gcr.io/cloud-builders/docker'
-  args: [
-    'build',
-    '-t',
-    '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/fraud-service:$SHORT_SHA',
-    '-f', 'fraud-service/Dockerfile',
-    '.'   #  IMPORTANT → project root context
-  ]
+    # 5) Build Docker image (only copy JAR, not rebuild Maven)
+  - id: "build-fraud"
+    name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'build',
+      '-t',
+      '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/fraud-service:$SHORT_SHA',
+      '-f', 'fraud-service/Dockerfile',
+      '.'   #  IMPORTANT → project root context
+    ]
 
-  # 6) Push image
-- id: "push-fraud"
-  name: 'gcr.io/cloud-builders/docker'
-  args: [
-    'push',
-    '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/fraud-service:$SHORT_SHA'
-  ]
+    # 6) Push image
+  - id: "push-fraud"
+    name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'push',
+      '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/fraud-service:$SHORT_SHA'
+    ]
 
-  # 7) Build Docker image (only copy JAR, not rebuild Maven)
-- id: "build-payment"
-  name: 'gcr.io/cloud-builders/docker'
-  args: [
-    'build',
-    '-t',
-    '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/payment-service:$SHORT_SHA',
-    '-f', 'payment-service/Dockerfile',
-    '.'   #  IMPORTANT → project root context
-  ]
+    # 7) Build Docker image (only copy JAR, not rebuild Maven)
+  - id: "build-payment"
+    name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'build',
+      '-t',
+      '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/payment-service:$SHORT_SHA',
+      '-f', 'payment-service/Dockerfile',
+      '.'   #  IMPORTANT → project root context
+    ]
 
-  # 8) Push image
-- id: "push-payment"
-  name: 'gcr.io/cloud-builders/docker'
-  args: [
-    'push',
-    '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/payment-service:$SHORT_SHA'
-  ]
+    # 8) Push image
+  - id: "push-payment"
+    name: 'gcr.io/cloud-builders/docker'
+    args: [
+      'push',
+      '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/payment-service:$SHORT_SHA'
+    ]
 
-# 9) Create (idempotent) GKE cluster
-- id: "create-gke-cluster"
-  name: 'gcr.io/cloud-builders/gcloud'
-  entrypoint: 'bash'
-  args:
-  - '-c'
-  - |
-    set -e
-    echo "Creating or verifying GKE cluster ${_CLUSTER_NAME} in zone ${_CLUSTER_ZONE}..."
-    # create cluster if it doesn't exist; tolerate if it already exists
-    gcloud container clusters describe "${_CLUSTER_NAME}" --zone "${_CLUSTER_ZONE}" >/dev/null 2>&1 || \
-      gcloud container clusters create "${_CLUSTER_NAME}" --zone "${_CLUSTER_ZONE}" --num-nodes=3 --quiet
+  # 9) Create (idempotent) GKE cluster
+  - id: "create-gke-cluster"
+    name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -e
+        echo "Creating or verifying GKE cluster ${_CLUSTER_NAME} in zone ${_CLUSTER_ZONE}..."
+        # create cluster if it doesn't exist; tolerate if it already exists
+        gcloud container clusters describe "${_CLUSTER_NAME}" --zone "${_CLUSTER_ZONE}" >/dev/null 2>&1 || \
+          gcloud container clusters create "${_CLUSTER_NAME}" --zone "${_CLUSTER_ZONE}" --num-nodes=3 --quiet
 
-# 10) Get GKE credentials (so kubectl can talk to the cluster)
-- id: "get-credentials"
-  name: 'gcr.io/cloud-builders/gcloud'
-  entrypoint: 'bash'
-  args:
-  - '-c'
-  - |
-    set -e
-    echo "Fetching GKE credentials for cluster ${_CLUSTER_NAME}..."
-    gcloud container clusters get-credentials "${_CLUSTER_NAME}" --zone "${_CLUSTER_ZONE}"
-
-# 11) Create GCP service account 'cloudsql-sa', grant roles, create & annotate Kubernetes ServiceAccount for Workload Identity
-- id: "create-cloudsql-gsa-and-ksa"
-  name: 'gcr.io/cloud-builders/gcloud'
-  entrypoint: 'bash'
-  args:
-  - '-c'
-  - |
-    set -e
-    # Variables
-    GSA_NAME=cloudsql-sa
-    KSA_NAME=cloudsql-sa
-    KSA_NAMESPACE=default
-
-    echo "Creating GCP service account ${GSA_NAME} (idempotent)..."
-    # create GSA if it doesn't exist
-    if ! gcloud iam service-accounts describe "${GSA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com" >/dev/null 2>&1; then
-      gcloud iam service-accounts create "${GSA_NAME}" --display-name="${GSA_NAME}" || true
-    else
-      echo "GCP service account ${GSA_NAME} already exists"
-    fi
-
-    GSA_EMAIL="${GSA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
-
-    echo "Granting Cloud SQL Client role to ${GSA_EMAIL}..."
-    gcloud projects add-iam-policy-binding "$PROJECT_ID" --member="serviceAccount:${GSA_EMAIL}" --role="roles/cloudsql.client" || true
-
-    echo "Ensuring Kubernetes service account ${KSA_NAME} exists in namespace ${KSA_NAMESPACE}..."
-    kubectl get serviceaccount ${KSA_NAME} --namespace ${KSA_NAMESPACE} >/dev/null 2>&1 || kubectl create serviceaccount ${KSA_NAME} --namespace ${KSA_NAMESPACE}
-
-    echo "Granting Workload Identity binding so KSA can impersonate GSA..."
-    # Allow the KSA to act as the GSA
-    gcloud iam service-accounts add-iam-policy-binding "${GSA_EMAIL}" \
-      --role="roles/iam.workloadIdentityUser" \
-      --member="serviceAccount:${PROJECT_ID}.svc.id.goog[${KSA_NAMESPACE}/${KSA_NAME}]" || true
-
-    echo "Annotating Kubernetes service account ${KSA_NAME} with GSA ${GSA_EMAIL}..."
-    kubectl annotate serviceaccount ${KSA_NAME} iam.gke.io/gcp-service-account=${GSA_EMAIL} --namespace ${KSA_NAMESPACE} --overwrite || true
-
-    echo "Cloud SQL GSA and KSA setup complete. GSA=${GSA_EMAIL}, KSA=${KSA_NAMESPACE}/${KSA_NAME}"
-
-# 12) Render k8s template and apply in one step (ensures envsubst availability)
-- id: "deploy-to-gke"
-  name: 'gcr.io/cloud-builders/gcloud'
-  entrypoint: 'bash'
-  args:
-  - '-c'
-  - |
-    set -e
-
-    echo "Ensuring envsubst (gettext-base) is available..."
-    if ! command -v envsubst >/dev/null 2>&1; then
-      apt-get update -y || true
-      apt-get install -y gettext-base || { echo "Failed to install gettext-base"; exit 1; }
-    fi
-
-    echo "Rendering k8s template with envsubst..."
-    export PROJECT_ID="$PROJECT_ID"
-    export SHORT_SHA="$SHORT_SHA"
-    export _REGION="${_REGION}"
-    export _REPOSITORY="${_REPOSITORY}"
-    export _CLUSTER_NAME="${_CLUSTER_NAME}"
-    export _CLUSTER_ZONE="${_CLUSTER_ZONE}"
-    export _DB_CONNECTION_NAME="${_DB_CONNECTION_NAME}"
-    export _DB_NAME="${_DB_NAME}"
-    export _DB_USER="${_DB_USER}"
-    export _DB_PASS="${_DB_PASS}"
-    envsubst < k8s/k8s-deploy-template.yaml > k8s-deploy.yaml
-    echo "Rendered manifest preview (first 100 lines):"
-    sed -n '1,100p' k8s-deploy.yaml || true
-
-    echo "Applying k8s manifest..."
-    kubectl apply -f k8s-deploy.yaml
+  # 10) Get credentials, render k8s template and apply in one step (ensures kubeconfig & envsubst availability)
+  - id: "deploy-to-gke"
+    name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -e
+        echo "Getting GKE credentials for cluster ${_CLUSTER_NAME}..."
+        gcloud container clusters get-credentials "${_CLUSTER_NAME}" --zone "${_CLUSTER_ZONE}"
+        
+        echo "Ensuring envsubst (gettext-base) is available..."
+        if ! command -v envsubst >/dev/null 2>&1; then
+          apt-get update -y || true
+          apt-get install -y gettext-base || { echo "Failed to install gettext-base"; exit 1; }
+        fi
+        
+        echo "Rendering k8s template with envsubst..."
+        export PROJECT_ID="$PROJECT_ID"
+        export SHORT_SHA="$SHORT_SHA"
+        export _REGION="${_REGION}"
+        export _REPOSITORY="${_REPOSITORY}"
+        export _CLUSTER_NAME="${_CLUSTER_NAME}"
+        export _CLUSTER_ZONE="${_CLUSTER_ZONE}"
+        export _DB_CONNECTION_NAME="${_DB_CONNECTION_NAME}"
+        export _DB_NAME="${_DB_NAME}"
+        export _DB_USER="${_DB_USER}"
+        export _DB_PASS="${_DB_PASS}"
+        envsubst < k8s/k8s-deploy-template.yaml > k8s-deploy.yaml
+        echo "Rendered manifest preview (first 100 lines):"
+        sed -n '1,100p' k8s-deploy.yaml || true
+        
+        echo "Applying k8s manifest..."
+        kubectl apply -f k8s-deploy.yaml
 
 # Images produced by this build
 images:
-- '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/order-service:$SHORT_SHA'
-- '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/fraud-service:$SHORT_SHA'
-- '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/payment-service:$SHORT_SHA'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/order-service:$SHORT_SHA'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/fraud-service:$SHORT_SHA'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/payment-service:$SHORT_SHA'
 
 # Substitutions and defaults
 substitutions:
