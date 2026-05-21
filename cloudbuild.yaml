@@ -74,23 +74,6 @@ steps:
     echo "Applying k8s manifests..."
     kubectl apply -f k8s-deploy.yaml
 
-# Optional: wait for order-service load balancer IP (short poll)
-- id: "wait-for-lb"
-  name: 'gcr.io/cloud-builders/kubectl'
-  entrypoint: 'bash'
-  args:
-  - '-c'
-  - |
-    for i in {1..20}; do
-      IP=$(kubectl get svc order-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
-      if [ -n "$IP" ]; then
-        echo "Order service external IP: $IP"
-        exit 0
-      fi
-      sleep 6
-    done
-    echo "Timed out waiting for order-service external IP"
-
 # Images produced by this build
 images:
 - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/order-service:$SHORT_SHA'
