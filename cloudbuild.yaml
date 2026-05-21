@@ -90,7 +90,7 @@ steps:
 
     # create k8s secret with DB connection details
     kubectl create secret generic db-credentials \
-      --from-literal=DB_CONNECTION_NAME="$DB_CONNECTION_NAME" \
+      --from-literal=_DB_CONNECTION_NAME="$DB_CONNECTION_NAME" \
       --from-literal=DB_NAME="${_DB_NAME}" \
       --from-literal=DB_USER="${_DB_USER}" \
       --from-literal=DB_PASS="${_DB_PASS}" \
@@ -98,7 +98,8 @@ steps:
 
     # Render k8s manifest from template (k8s/k8s-deploy-template.yaml) using envsubst
     # Export variables for the template. Template expects DB_CONNECTION_NAME (Cloud SQL instance), not a raw IP.
-    export DB_CONNECTION_NAME
+    # export underscore-prefixed substitution variable so template can reference ${_DB_CONNECTION_NAME}
+    export _DB_CONNECTION_NAME="$DB_CONNECTION_NAME"
     export PROJECT_ID="$PROJECT_ID"
     export SHORT_SHA="$SHORT_SHA"
     export DB_NAME="${_DB_NAME}"

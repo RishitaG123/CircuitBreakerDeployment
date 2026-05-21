@@ -40,7 +40,7 @@ spec:
         - name: cloud-sql-proxy
           image: gcr.io/cloudsql-docker/gce-proxy:1.33.2
           command: ["/cloud_sql_proxy"]
-          args: ["-instances=${DB_CONNECTION_NAME}=tcp:5432"]
+          args: ["-instances=${_DB_CONNECTION_NAME}=tcp:5432"]
           # If you are not using Workload Identity, mount a service account key and enable credential_file:
           # volumeMounts:
           #   - name: cloudsql-instance-credentials
@@ -94,7 +94,7 @@ spec:
         - name: cloud-sql-proxy
           image: gcr.io/cloudsql-docker/gce-proxy:1.33.2
           command: ["/cloud_sql_proxy"]
-          args: ["-instances=${DB_CONNECTION_NAME}=tcp:5432"]
+          args: ["-instances=${_DB_CONNECTION_NAME}=tcp:5432"]
           # If you are not using Workload Identity, mount a service account key and enable credential_file:
           # volumeMounts:
           #   - name: cloudsql-instance-credentials
