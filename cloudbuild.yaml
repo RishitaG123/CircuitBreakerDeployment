@@ -13,8 +13,10 @@ steps:
     gcloud artifacts repositories create "${_REPOSITORY}" --repository-format=docker --location="${_REGION}" --quiet || echo "artifact repo may already exist"
 
 
+  #  Build project with Java 21
 - id: "Build Maven project"
-  name: 'gcr.io/cloud-builders/mvn'
+  name: 'maven:3.9.9-eclipse-temurin-21'
+  entrypoint: 'mvn'
   args: ['clean', 'install', '-DskipTests']
 
 # 2) Build and push images for each service
