@@ -1,155 +1,109 @@
-# Cloud Build configuration for microservices deployment
+# Minimal Cloud Build pipeline: build images, push to Artifact Registry, create GKE cluster, deploy to GKE
 steps:
-# 0) Create Artifact Registry repository (idempotent)
-- id: "Create Artifact Registry repository"
+
+# 1) Ensure Artifact Registry repository exists (idempotent)
+- id: "create-artifact-repo"
   name: 'gcr.io/cloud-builders/gcloud'
   entrypoint: 'bash'
   args:
   - '-c'
   - |
     set -e
-    echo "Creating Artifact Registry repository ${_REPOSITORY} in region ${_REGION}..."
-    gcloud artifacts repositories create "${_REPOSITORY}" --repository-format=docker --location="${_REGION}" --quiet || echo "repository may already exist"
+    echo "Ensuring Artifact Registry repo ${_REPOSITORY} exists in ${_REGION}..."
+    gcloud artifacts repositories create "${_REPOSITORY}" --repository-format=docker --location="${_REGION}" --quiet || echo "artifact repo may already exist"
 
-# 1) Build and push images to Artifact Registry
-- id: "Build order-service image"
+# 2) Build and push images for each service
+- id: "build-and-push-order"
   name: 'gcr.io/cloud-builders/docker'
-  args: ['build', '-t', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/order-service:$SHORT_SHA', './order-service']
+  args: ['build','-t','${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/order-service:$SHORT_SHA','./order-service']
 
-- id: "Push order-service image"
+- id: "push-order"
   name: 'gcr.io/cloud-builders/docker'
-  args: ['push', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/order-service:$SHORT_SHA']
+  args: ['push','${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/order-service:$SHORT_SHA']
 
-- id: "Build fraud-service image"
+- id: "build-and-push-fraud"
   name: 'gcr.io/cloud-builders/docker'
-  args: ['build', '-t', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/fraud-service:$SHORT_SHA', './fraud-service']
+  args: ['build','-t','${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/fraud-service:$SHORT_SHA','./fraud-service']
 
-- id: "Push fraud-service image"
+- id: "push-fraud"
   name: 'gcr.io/cloud-builders/docker'
-  args: ['push', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/fraud-service:$SHORT_SHA']
+  args: ['push','${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/fraud-service:$SHORT_SHA']
 
-- id: "Build payment-service image"
+- id: "build-and-push-payment"
   name: 'gcr.io/cloud-builders/docker'
-  args: ['build', '-t', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/payment-service:$SHORT_SHA', './payment-service']
+  args: ['build','-t','${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/payment-service:$SHORT_SHA','./payment-service']
 
-- id: "Push payment-service image"
+- id: "push-payment"
   name: 'gcr.io/cloud-builders/docker'
-  args: ['push', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/payment-service:$SHORT_SHA']
+  args: ['push','${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/payment-service:$SHORT_SHA']
 
-# 2) Create GKE cluster
-- id: "Create GKE cluster"
+# 3) Create (idempotent) GKE cluster
+- id: "create-gke-cluster"
   name: 'gcr.io/cloud-builders/gcloud'
   entrypoint: 'bash'
   args:
   - '-c'
   - |
     set -e
-    echo "Creating GKE cluster ${_CLUSTER_NAME} in zone ${_CLUSTER_ZONE}..."
-    gcloud container clusters create "${_CLUSTER_NAME}" --zone "${_CLUSTER_ZONE}" --num-nodes=3 --quiet || true
+    echo "Creating or verifying GKE cluster ${_CLUSTER_NAME} in zone ${_CLUSTER_ZONE}..."
+    # create cluster if it doesn't exist; tolerate if it already exists
+    gcloud container clusters describe "${_CLUSTER_NAME}" --zone "${_CLUSTER_ZONE}" >/dev/null 2>&1 || \
+      gcloud container clusters create "${_CLUSTER_NAME}" --zone "${_CLUSTER_ZONE}" --num-nodes=3 --quiet
 
-# 3) Get credentials for kubectl
-- id: "Get GKE credentials"
+# 4) Get cluster credentials
+- id: "get-credentials"
   name: 'gcr.io/cloud-builders/gcloud'
   args: ['container','clusters','get-credentials','${_CLUSTER_NAME}','--zone','${_CLUSTER_ZONE}']
 
-# 4) Create Cloud SQL Postgres instance (idempotent)
-- id: "Create Cloud SQL (Postgres)"
+# 5) Render k8s template and deploy to GKE
+- id: "render-and-apply-k8s"
   name: 'gcr.io/cloud-builders/gcloud'
   entrypoint: 'bash'
   args:
   - '-c'
   - |
     set -e
-    echo "Creating Cloud SQL instance ${_DB_INSTANCE} (region ${_DB_REGION})..."
-    gcloud sql instances create "${_DB_INSTANCE}" --database-version=POSTGRES_14 --tier=db-f1-micro --region="${_DB_REGION}" --quiet || echo "instance may already exist"
-    echo "Setting DB user/password and creating database"
-    gcloud sql users set-password "${_DB_USER}" --instance="${_DB_INSTANCE}" --password="${_DB_PASS}" --quiet || true
-    gcloud sql databases create "${_DB_NAME}" --instance="${_DB_INSTANCE}" --quiet || echo "database may already exist"
-
-# 5) Get Cloud SQL IP, create k8s secret, and generate + apply manifests
-- id: "Deploy to GKE (manifests + secrets)"
-  name: 'gcr.io/cloud-builders/gcloud'
-  entrypoint: 'bash'
-  args:
-  - '-c'
-  - |
-    set -e
-    echo "Resolving Cloud SQL instance connection name (supports optional substitution _DB_CONNECTION_NAME)..."
-    # If caller provided `_DB_CONNECTION_NAME`, prefer it; otherwise look up the instance connectionName
-    if [ -n "${_DB_CONNECTION_NAME}" ]; then
-      DB_CONNECTION_NAME="${_DB_CONNECTION_NAME}"
-      echo "Using DB connection name from substitution _DB_CONNECTION_NAME: $DB_CONNECTION_NAME"
-    else
-      DB_CONNECTION_NAME=$(gcloud sql instances describe "${_DB_INSTANCE}" --format='value(connectionName)')
-      if [ -z "$DB_CONNECTION_NAME" ]; then
-        echo "Could not determine Cloud SQL instance connection name; ensure instance exists or pass _DB_CONNECTION_NAME substitution." >&2
-        exit 1
-      fi
-      echo "Cloud SQL connection name (looked up): $DB_CONNECTION_NAME"
-    fi
-
-    # create k8s secret with DB connection details
-    kubectl create secret generic db-credentials \
-      --from-literal=_DB_CONNECTION_NAME="$DB_CONNECTION_NAME" \
-      --from-literal=DB_NAME="${_DB_NAME}" \
-      --from-literal=DB_USER="${_DB_USER}" \
-      --from-literal=DB_PASS="${_DB_PASS}" \
-      --dry-run=client -o yaml | kubectl apply -f -
-
-    # Render k8s manifest from template (k8s/k8s-deploy-template.yaml) using envsubst
-    # Export variables for the template. Template expects DB_CONNECTION_NAME (Cloud SQL instance), not a raw IP.
-    # export underscore-prefixed substitution variable so template can reference ${_DB_CONNECTION_NAME}
-    export _DB_CONNECTION_NAME="$DB_CONNECTION_NAME"
+    echo "Rendering k8s template k8s/k8s-deploy-template.yaml with envsubst..."
+    # Export values used in the template
     export PROJECT_ID="$PROJECT_ID"
     export SHORT_SHA="$SHORT_SHA"
-    export DB_NAME="${_DB_NAME}"
-    export DB_USER="${_DB_USER}"
-    export DB_PASS="${_DB_PASS}"
     export _REGION="${_REGION}"
     export _REPOSITORY="${_REPOSITORY}"
-    # Render template
+    # Render template (ensure envsubst is available in this image)
     envsubst < k8s/k8s-deploy-template.yaml > k8s-deploy.yaml
-
-    echo "Applying Kubernetes manifests..."
+    echo "Applying k8s manifests..."
     kubectl apply -f k8s-deploy.yaml
 
-# 6) Optional: wait for order-service External IP
-- id: "Wait for order-service LB"
+# Optional: wait for order-service load balancer IP (short poll)
+- id: "wait-for-lb"
   name: 'gcr.io/cloud-builders/kubectl'
   entrypoint: 'bash'
   args:
   - '-c'
   - |
-    echo "Waiting for external IP for order-service (this may take a minute)..."
-    for i in {1..30}; do
-      IP=$$(kubectl get svc order-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
-      if [ -n "$$IP" ]; then
-        echo "Order service available at http://$$IP"
-        break
+    for i in {1..20}; do
+      IP=$(kubectl get svc order-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
+      if [ -n "$IP" ]; then
+        echo "Order service external IP: $IP"
+        exit 0
       fi
-      sleep 5
+      sleep 6
     done
+    echo "Timed out waiting for order-service external IP"
 
+# Images produced by this build
 images:
 - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/order-service:$SHORT_SHA'
 - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/fraud-service:$SHORT_SHA'
 - '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/payment-service:$SHORT_SHA'
 
+# Substitutions and defaults
 substitutions:
   _REGION: "us-central1"
   _REPOSITORY: "microservices-repo"
   _CLUSTER_NAME: "cb-cluster"
   _CLUSTER_ZONE: "us-central1-a"
-  _DB_INSTANCE: "cb-sql-instance"
-  _DB_REGION: "us-central1"
-  _DB_NAME: "payments"
-  _DB_USER: "postgres"
-  _DB_PASS: "123"
-  _DB_IP: ""
-  _DB_CONNECTION_NAME: ""
 
 options:
   substitutionOption: ALLOW_LOOSE
   logging: CLOUD_LOGGING_ONLY
-
-# Not using artifacts; this pipeline assumes Cloud Build has appropriate IAM to create GKE, Cloud SQL and deploy.
