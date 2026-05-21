@@ -126,5 +126,6 @@ substitutions:
 
 options:
   substitutionOption: ALLOW_LOOSE
+  logging: CLOUD_LOGGING_ONLY
 
 # Not using artifacts; this pipeline assumes Cloud Build has appropriate IAM to create GKE, Cloud SQL and deploy.
