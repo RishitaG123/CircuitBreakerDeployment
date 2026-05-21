@@ -1,0 +1,115 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: fraud-service
+spec:
+  selector:
+    app: fraud-service
+  ports:
+    - protocol: TCP
+      port: 8081
+      targetPort: 8081
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fraud-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: fraud-service
+  template:
+    metadata:
+      labels:
+        app: fraud-service
+    spec:
+      containers:
+        - name: fraud-service
+          image: gcr.io/${PROJECT_ID}/fraud-service:${SHORT_SHA}
+          ports:
+            - containerPort: 8081
+          env:
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:postgresql://${DB_IP}:5432/${_DB_NAME}"
+            - name: SPRING_DATASOURCE_USERNAME
+              value: "${_DB_USER}"
+            - name: SPRING_DATASOURCE_PASSWORD
+              value: "${_DB_PASS}"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment-service
+spec:
+  selector:
+    app: payment-service
+  ports:
+    - protocol: TCP
+      port: 8082
+      targetPort: 8082
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: payment-service
+  template:
+    metadata:
+      labels:
+        app: payment-service
+    spec:
+      containers:
+        - name: payment-service
+          image: gcr.io/${PROJECT_ID}/payment-service:${SHORT_SHA}
+          ports:
+            - containerPort: 8082
+          env:
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:postgresql://${DB_IP}:5432/${_DB_NAME}"
+            - name: SPRING_DATASOURCE_USERNAME
+              value: "${_DB_USER}"
+            - name: SPRING_DATASOURCE_PASSWORD
+              value: "${_DB_PASS}"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-service
+spec:
+  type: LoadBalancer
+  selector:
+    app: order-service
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: order-service
+  template:
+    metadata:
+      labels:
+        app: order-service
+    spec:
+      containers:
+        - name: order-service
+          image: gcr.io/${PROJECT_ID}/order-service:${SHORT_SHA}
+          ports:
+            - containerPort: 8080
+          env:
+            - name: SERVICES_FRAUD
+              value: "http://fraud-service:8081"
+            - name: SERVICES_PAYMENT
+              value: "http://payment-service:8082"

@@ -1,15 +1,4 @@
-options:
-  substitutionOption: ALLOW_LOOSE
-
-substitutions:
-  _CLUSTER_NAME: "cb-cluster"
-  _CLUSTER_ZONE: "us-central1-a"
-  _DB_INSTANCE: "cb-sql-instance"
-  _DB_REGION: "us-central1"
-  _DB_NAME: "payments"
-  _DB_USER: "postgres"
-  _DB_PASS: "123"
-
+# Cloud Build configuration for microservices deployment
 steps:
 # 1) Build images
 - id: "Build order-service image"
@@ -90,124 +79,16 @@ steps:
       --from-literal=DB_PASS="${_DB_PASS}" \
       --dry-run=client -o yaml | kubectl apply -f -
 
-    # Generate Kubernetes manifests embedding the pushed image tags and DB IP
-    cat > k8s-deploy.yaml <<EOF
-apiVersion: v1
-kind: Service
-metadata:
-  name: fraud-service
-spec:
-  selector:
-    app: fraud-service
-  ports:
-    - protocol: TCP
-      port: 8081
-      targetPort: 8081
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: fraud-service
-spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app: fraud-service
-  template:
-    metadata:
-      labels:
-        app: fraud-service
-    spec:
-      containers:
-        - name: fraud-service
-          image: gcr.io/$PROJECT_ID/fraud-service:$SHORT_SHA
-          ports:
-            - containerPort: 8081
-          env:
-            - name: SPRING_DATASOURCE_URL
-              value: "jdbc:postgresql://$DB_IP:5432/${_DB_NAME}"
-            - name: SPRING_DATASOURCE_USERNAME
-              value: "${_DB_USER}"
-            - name: SPRING_DATASOURCE_PASSWORD
-              value: "${_DB_PASS}"
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: payment-service
-spec:
-  selector:
-    app: payment-service
-  ports:
-    - protocol: TCP
-      port: 8082
-      targetPort: 8082
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: payment-service
-spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app: payment-service
-  template:
-    metadata:
-      labels:
-        app: payment-service
-    spec:
-      containers:
-        - name: payment-service
-          image: gcr.io/$PROJECT_ID/payment-service:$SHORT_SHA
-          ports:
-            - containerPort: 8082
-          env:
-            - name: SPRING_DATASOURCE_URL
-              value: "jdbc:postgresql://$DB_IP:5432/${_DB_NAME}"
-            - name: SPRING_DATASOURCE_USERNAME
-              value: "${_DB_USER}"
-            - name: SPRING_DATASOURCE_PASSWORD
-              value: "${_DB_PASS}"
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: order-service
-spec:
-  type: LoadBalancer
-  selector:
-    app: order-service
-  ports:
-    - protocol: TCP
-      port: 80
-      targetPort: 8080
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: order-service
-spec:
-  replicas: 2
-  selector:
-    matchLabels:
-      app: order-service
-  template:
-    metadata:
-      labels:
-        app: order-service
-    spec:
-      containers:
-        - name: order-service
-          image: gcr.io/$PROJECT_ID/order-service:$SHORT_SHA
-          ports:
-            - containerPort: 8080
-          env:
-            - name: SERVICES_FRAUD
-              value: "http://fraud-service:8081"
-            - name: SERVICES_PAYMENT
-              value: "http://payment-service:8082"
-EOF
+    # Render k8s manifest from template (k8s/k8s-deploy-template.yaml) using envsubst
+    export DB_IP
+    # Export Cloud Build substitutions into plain env var names used by the template
+    export PROJECT_ID="$PROJECT_ID"
+    export SHORT_SHA="$SHORT_SHA"
+    export DB_NAME="${_DB_NAME}"
+    export DB_USER="${_DB_USER}"
+    export DB_PASS="${_DB_PASS}"
+    # Render template
+    envsubst < k8s/k8s-deploy-template.yaml > k8s-deploy.yaml
 
     echo "Applying Kubernetes manifests..."
     kubectl apply -f k8s-deploy.yaml
@@ -221,9 +102,9 @@ EOF
   - |
     echo "Waiting for external IP for order-service (this may take a minute)..."
     for i in {1..30}; do
-      IP=$(kubectl get svc order-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
-      if [ -n "$IP" ]; then
-        echo "Order service available at http://$IP"
+      IP=$$(kubectl get svc order-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
+      if [ -n "$$IP" ]; then
+        echo "Order service available at http://$$IP"
         break
       fi
       sleep 5
@@ -233,5 +114,17 @@ images:
 - 'gcr.io/$PROJECT_ID/order-service:$SHORT_SHA'
 - 'gcr.io/$PROJECT_ID/fraud-service:$SHORT_SHA'
 - 'gcr.io/$PROJECT_ID/payment-service:$SHORT_SHA'
+
+substitutions:
+  _CLUSTER_NAME: "cb-cluster"
+  _CLUSTER_ZONE: "us-central1-a"
+  _DB_INSTANCE: "cb-sql-instance"
+  _DB_REGION: "us-central1"
+  _DB_NAME: "payments"
+  _DB_USER: "postgres"
+  _DB_PASS: "123"
+
+options:
+  substitutionOption: ALLOW_LOOSE
 
 # Not using artifacts; this pipeline assumes Cloud Build has appropriate IAM to create GKE, Cloud SQL and deploy.
