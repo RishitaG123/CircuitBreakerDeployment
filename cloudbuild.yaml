@@ -63,13 +63,19 @@ steps:
   - '-c'
   - |
     set -e
-    echo "Resolving Cloud SQL IP..."
-    DB_IP=$(gcloud sql instances describe "${_DB_INSTANCE}" --format='value(ipAddresses[0].ipAddress)')
-    if [ -z "$DB_IP" ]; then
-      echo "Could not determine DB IP. Ensure Cloud SQL has a public IP or adjust connectivity setup." >&2
-      exit 1
+    echo "Resolving Cloud SQL IP (supports optional substitution _DB_IP)..."
+    # If caller passed an explicit substitution '_DB_IP' use it, otherwise query instance
+    if [ -n "${_DB_IP}" ]; then
+      DB_IP="${_DB_IP}"
+      echo "Using DB IP from substitution _DB_IP: $DB_IP"
+    else
+      DB_IP=$(gcloud sql instances describe "${_DB_INSTANCE}" --format='value(ipAddresses[0].ipAddress)')
+      if [ -z "$DB_IP" ]; then
+        echo "Could not determine DB IP. Ensure Cloud SQL has a public IP or adjust connectivity setup." >&2
+        exit 1
+      fi
+      echo "Cloud SQL IP (looked up): $DB_IP"
     fi
-    echo "Cloud SQL IP: $DB_IP"
 
     # create k8s secret with DB connection details
     kubectl create secret generic db-credentials \
@@ -123,6 +129,7 @@ substitutions:
   _DB_NAME: "payments"
   _DB_USER: "postgres"
   _DB_PASS: "123"
+  _DB_IP: ""
 
 options:
   substitutionOption: ALLOW_LOOSE
