@@ -12,21 +12,31 @@ steps:
     echo "Ensuring Artifact Registry repo ${_REPOSITORY} exists in ${_REGION}..."
     gcloud artifacts repositories create "${_REPOSITORY}" --repository-format=docker --location="${_REGION}" --quiet || echo "artifact repo may already exist"
 
-
-  #  Build project with Java 21
+  # 1) Build full project (parent + all services)
 - id: "Build Maven project"
   name: 'maven:3.9.9-eclipse-temurin-21'
   entrypoint: 'mvn'
   args: ['clean', 'install', '-DskipTests']
 
-# 2) Build and push images for each service
-- id: "build-and-push-order"
+  # 2) Build Docker image (only copy JAR, not rebuild Maven)
+- id: "build-order"
   name: 'gcr.io/cloud-builders/docker'
-  args: ['build','-t','${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/order-service:$SHORT_SHA','./order-service']
+  args: [
+    'build',
+    '-t',
+    '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/order-service:$SHORT_SHA',
+    '-f', 'order-service/Dockerfile',
+    '.'   #  IMPORTANT → project root context
+  ]
 
+  # 3) Push image
 - id: "push-order"
   name: 'gcr.io/cloud-builders/docker'
-  args: ['push','${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/order-service:$SHORT_SHA']
+  args: [
+    'push',
+    '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/order-service:$SHORT_SHA'
+  ]
+
 
 - id: "build-and-push-fraud"
   name: 'gcr.io/cloud-builders/docker'
