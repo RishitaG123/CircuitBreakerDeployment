@@ -13,6 +13,10 @@ steps:
     gcloud artifacts repositories create "${_REPOSITORY}" --repository-format=docker --location="${_REGION}" --quiet || echo "artifact repo may already exist"
 
 
+- id: "Build Maven project"
+  name: 'gcr.io/cloud-builders/mvn'
+  args: ['clean', 'install', '-DskipTests']
+
 # 2) Build and push images for each service
 - id: "build-and-push-order"
   name: 'gcr.io/cloud-builders/docker'
