@@ -57,7 +57,7 @@ steps:
   ]
 
   # 7) Build Docker image (only copy JAR, not rebuild Maven)
-- id: "build-fraud"
+- id: "build-payment"
   name: 'gcr.io/cloud-builders/docker'
   args: [
     'build',
@@ -68,7 +68,7 @@ steps:
   ]
 
   # 8) Push image
-- id: "push-fraud"
+- id: "push-payment"
   name: 'gcr.io/cloud-builders/docker'
   args: [
     'push',
