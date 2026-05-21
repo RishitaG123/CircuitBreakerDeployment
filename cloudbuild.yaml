@@ -88,7 +88,58 @@ steps:
     gcloud container clusters describe "${_CLUSTER_NAME}" --zone "${_CLUSTER_ZONE}" >/dev/null 2>&1 || \
       gcloud container clusters create "${_CLUSTER_NAME}" --zone "${_CLUSTER_ZONE}" --num-nodes=3 --quiet
 
-# 10) Get credentials, render k8s template and apply in one step (ensures kubeconfig & envsubst availability)
+# 10) Get GKE credentials (so kubectl can talk to the cluster)
+- id: "get-credentials"
+  name: 'gcr.io/cloud-builders/gcloud'
+  entrypoint: 'bash'
+  args:
+  - '-c'
+  - |
+    set -e
+    echo "Fetching GKE credentials for cluster ${_CLUSTER_NAME}..."
+    gcloud container clusters get-credentials "${_CLUSTER_NAME}" --zone "${_CLUSTER_ZONE}"
+
+# 11) Create GCP service account 'cloudsql-sa', grant roles, create & annotate Kubernetes ServiceAccount for Workload Identity
+- id: "create-cloudsql-gsa-and-ksa"
+  name: 'gcr.io/cloud-builders/gcloud'
+  entrypoint: 'bash'
+  args:
+  - '-c'
+  - |
+    set -e
+    # Variables
+    GSA_NAME=cloudsql-sa
+    KSA_NAME=cloudsql-sa
+    KSA_NAMESPACE=default
+
+    echo "Creating GCP service account ${GSA_NAME} (idempotent)..."
+    # create GSA if it doesn't exist
+    if ! gcloud iam service-accounts describe "${GSA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com" >/dev/null 2>&1; then
+      gcloud iam service-accounts create "${GSA_NAME}" --display-name="${GSA_NAME}" || true
+    else
+      echo "GCP service account ${GSA_NAME} already exists"
+    fi
+
+    GSA_EMAIL="${GSA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
+
+    echo "Granting Cloud SQL Client role to ${GSA_EMAIL}..."
+    gcloud projects add-iam-policy-binding "$PROJECT_ID" --member="serviceAccount:${GSA_EMAIL}" --role="roles/cloudsql.client" || true
+
+    echo "Ensuring Kubernetes service account ${KSA_NAME} exists in namespace ${KSA_NAMESPACE}..."
+    kubectl get serviceaccount ${KSA_NAME} --namespace ${KSA_NAMESPACE} >/dev/null 2>&1 || kubectl create serviceaccount ${KSA_NAME} --namespace ${KSA_NAMESPACE}
+
+    echo "Granting Workload Identity binding so KSA can impersonate GSA..."
+    # Allow the KSA to act as the GSA
+    gcloud iam service-accounts add-iam-policy-binding "${GSA_EMAIL}" \
+      --role="roles/iam.workloadIdentityUser" \
+      --member="serviceAccount:${PROJECT_ID}.svc.id.goog[${KSA_NAMESPACE}/${KSA_NAME}]" || true
+
+    echo "Annotating Kubernetes service account ${KSA_NAME} with GSA ${GSA_EMAIL}..."
+    kubectl annotate serviceaccount ${KSA_NAME} iam.gke.io/gcp-service-account=${GSA_EMAIL} --namespace ${KSA_NAMESPACE} --overwrite || true
+
+    echo "Cloud SQL GSA and KSA setup complete. GSA=${GSA_EMAIL}, KSA=${KSA_NAMESPACE}/${KSA_NAME}"
+
+# 12) Render k8s template and apply in one step (ensures envsubst availability)
 - id: "deploy-to-gke"
   name: 'gcr.io/cloud-builders/gcloud'
   entrypoint: 'bash'
@@ -96,8 +147,6 @@ steps:
   - '-c'
   - |
     set -e
-    echo "Getting GKE credentials for cluster ${_CLUSTER_NAME}..."
-    gcloud container clusters get-credentials "${_CLUSTER_NAME}" --zone "${_CLUSTER_ZONE}"
 
     echo "Ensuring envsubst (gettext-base) is available..."
     if ! command -v envsubst >/dev/null 2>&1; then
