@@ -1,79 +1,79 @@
 # Minimal Cloud Build pipeline: build images, push to Artifact Registry, create GKE cluster, deploy to GKE
 steps:
-
-# 1) Ensure Artifact Registry repository exists (idempotent)
-- id: "create-artifact-repo"
-  name: 'gcr.io/cloud-builders/gcloud'
-  entrypoint: 'bash'
-  args:
-  - '-c'
-  - |
-    set -e
-    echo "Ensuring Artifact Registry repo ${_REPOSITORY} exists in ${_REGION}..."
-    gcloud artifacts repositories create "${_REPOSITORY}" --repository-format=docker --location="${_REGION}" --quiet || echo "artifact repo may already exist"
-
-  # 2) Build full project (parent + all services)
-- id: "Build Maven project"
-  name: 'maven:3.9.9-eclipse-temurin-21'
-  entrypoint: 'mvn'
-  args: ['clean', 'install', '-DskipTests']
-
-  # 3) Build Docker image (only copy JAR, not rebuild Maven)
-- id: "build-order"
-  name: 'gcr.io/cloud-builders/docker'
-  args: [
-    'build',
-    '-t',
-    '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/order-service:$SHORT_SHA',
-    '-f', 'order-service/Dockerfile',
-    '.'   #  IMPORTANT → project root context
-  ]
-
-  # 4) Push image
-- id: "push-order"
-  name: 'gcr.io/cloud-builders/docker'
-  args: [
-    'push',
-    '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/order-service:$SHORT_SHA'
-  ]
-
-  # 5) Build Docker image (only copy JAR, not rebuild Maven)
-- id: "build-fraud"
-  name: 'gcr.io/cloud-builders/docker'
-  args: [
-    'build',
-    '-t',
-    '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/fraud-service:$SHORT_SHA',
-    '-f', 'fraud-service/Dockerfile',
-    '.'   #  IMPORTANT → project root context
-  ]
-
-  # 6) Push image
-- id: "push-fraud"
-  name: 'gcr.io/cloud-builders/docker'
-  args: [
-    'push',
-    '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/fraud-service:$SHORT_SHA'
-  ]
-
-  # 7) Build Docker image (only copy JAR, not rebuild Maven)
-- id: "build-payment"
-  name: 'gcr.io/cloud-builders/docker'
-  args: [
-    'build',
-    '-t',
-    '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/payment-service:$SHORT_SHA',
-    '-f', 'payment-service/Dockerfile',
-    '.'   #  IMPORTANT → project root context
-  ]
-
-  # 8) Push image
-- id: "push-payment"
-  name: 'gcr.io/cloud-builders/docker'
-  args: [
-    'push',
-    '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/payment-service:$SHORT_SHA'
-  ]
+#
+## 1) Ensure Artifact Registry repository exists (idempotent)
+#- id: "create-artifact-repo"
+#  name: 'gcr.io/cloud-builders/gcloud'
+#  entrypoint: 'bash'
+#  args:
+#  - '-c'
+#  - |
+#    set -e
+#    echo "Ensuring Artifact Registry repo ${_REPOSITORY} exists in ${_REGION}..."
+#    gcloud artifacts repositories create "${_REPOSITORY}" --repository-format=docker --location="${_REGION}" --quiet || echo "artifact repo may already exist"
+#
+#  # 2) Build full project (parent + all services)
+#- id: "Build Maven project"
+#  name: 'maven:3.9.9-eclipse-temurin-21'
+#  entrypoint: 'mvn'
+#  args: ['clean', 'install', '-DskipTests']
+#
+#  # 3) Build Docker image (only copy JAR, not rebuild Maven)
+#- id: "build-order"
+#  name: 'gcr.io/cloud-builders/docker'
+#  args: [
+#    'build',
+#    '-t',
+#    '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/order-service:$SHORT_SHA',
+#    '-f', 'order-service/Dockerfile',
+#    '.'   #  IMPORTANT → project root context
+#  ]
+#
+#  # 4) Push image
+#- id: "push-order"
+#  name: 'gcr.io/cloud-builders/docker'
+#  args: [
+#    'push',
+#    '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/order-service:$SHORT_SHA'
+#  ]
+#
+#  # 5) Build Docker image (only copy JAR, not rebuild Maven)
+#- id: "build-fraud"
+#  name: 'gcr.io/cloud-builders/docker'
+#  args: [
+#    'build',
+#    '-t',
+#    '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/fraud-service:$SHORT_SHA',
+#    '-f', 'fraud-service/Dockerfile',
+#    '.'   #  IMPORTANT → project root context
+#  ]
+#
+#  # 6) Push image
+#- id: "push-fraud"
+#  name: 'gcr.io/cloud-builders/docker'
+#  args: [
+#    'push',
+#    '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/fraud-service:$SHORT_SHA'
+#  ]
+#
+#  # 7) Build Docker image (only copy JAR, not rebuild Maven)
+#- id: "build-payment"
+#  name: 'gcr.io/cloud-builders/docker'
+#  args: [
+#    'build',
+#    '-t',
+#    '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/payment-service:$SHORT_SHA',
+#    '-f', 'payment-service/Dockerfile',
+#    '.'   #  IMPORTANT → project root context
+#  ]
+#
+#  # 8) Push image
+#- id: "push-payment"
+#  name: 'gcr.io/cloud-builders/docker'
+#  args: [
+#    'push',
+#    '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/payment-service:$SHORT_SHA'
+#  ]
 
 # 9) Create (idempotent) GKE cluster
 - id: "create-gke-cluster"
@@ -88,28 +88,39 @@ steps:
     gcloud container clusters describe "${_CLUSTER_NAME}" --zone "${_CLUSTER_ZONE}" >/dev/null 2>&1 || \
       gcloud container clusters create "${_CLUSTER_NAME}" --zone "${_CLUSTER_ZONE}" --num-nodes=3 --quiet
 
-# 10) Get cluster credentials
-- id: "get-credentials"
-  name: 'gcr.io/cloud-builders/gcloud'
-  args: ['container','clusters','get-credentials','${_CLUSTER_NAME}','--zone','${_CLUSTER_ZONE}']
-
-# 11) Render k8s template and deploy to GKE
-- id: "render-and-apply-k8s"
+# 10) Get credentials, render k8s template and apply in one step (ensures kubeconfig & envsubst availability)
+- id: "deploy-to-gke"
   name: 'gcr.io/cloud-builders/gcloud'
   entrypoint: 'bash'
   args:
   - '-c'
   - |
     set -e
-    echo "Rendering k8s template k8s/k8s-deploy-template.yaml with envsubst..."
-    # Export values used in the template
+    echo "Getting GKE credentials for cluster ${_CLUSTER_NAME}..."
+    gcloud container clusters get-credentials "${_CLUSTER_NAME}" --zone "${_CLUSTER_ZONE}"
+
+    echo "Ensuring envsubst (gettext-base) is available..."
+    if ! command -v envsubst >/dev/null 2>&1; then
+      apt-get update -y || true
+      apt-get install -y gettext-base || { echo "Failed to install gettext-base"; exit 1; }
+    fi
+
+    echo "Rendering k8s template with envsubst..."
     export PROJECT_ID="$PROJECT_ID"
     export SHORT_SHA="$SHORT_SHA"
     export _REGION="${_REGION}"
     export _REPOSITORY="${_REPOSITORY}"
-    # Render template (ensure envsubst is available in this image)
+    export _CLUSTER_NAME="${_CLUSTER_NAME}"
+    export _CLUSTER_ZONE="${_CLUSTER_ZONE}"
+    export _DB_CONNECTION_NAME="${_DB_CONNECTION_NAME}"
+    export _DB_NAME="${_DB_NAME}"
+    export _DB_USER="${_DB_USER}"
+    export _DB_PASS="${_DB_PASS}"
     envsubst < k8s/k8s-deploy-template.yaml > k8s-deploy.yaml
-    echo "Applying k8s manifests..."
+    echo "Rendered manifest preview (first 100 lines):"
+    sed -n '1,100p' k8s-deploy.yaml || true
+
+    echo "Applying k8s manifest..."
     kubectl apply -f k8s-deploy.yaml
 
 # Images produced by this build
