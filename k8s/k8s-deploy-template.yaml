@@ -24,18 +24,33 @@ spec:
       labels:
         app: fraud-service
     spec:
+      serviceAccountName: cloudsql-sa
       containers:
         - name: fraud-service
-          image: gcr.io/${PROJECT_ID}/fraud-service:${SHORT_SHA}
+          image: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/fraud-service:${SHORT_SHA}
           ports:
             - containerPort: 8081
           env:
             - name: SPRING_DATASOURCE_URL
-              value: "jdbc:postgresql://${DB_IP}:5432/${_DB_NAME}"
+              value: "jdbc:postgresql://127.0.0.1:5432/${DB_NAME}"
             - name: SPRING_DATASOURCE_USERNAME
-              value: "${_DB_USER}"
+              value: "${DB_USER}"
             - name: SPRING_DATASOURCE_PASSWORD
-              value: "${_DB_PASS}"
+              value: "${DB_PASS}"
+        - name: cloud-sql-proxy
+          image: gcr.io/cloudsql-docker/gce-proxy:1.33.2
+          command: ["/cloud_sql_proxy"]
+          args: ["-instances=${DB_CONNECTION_NAME}=tcp:5432"]
+          # If you are not using Workload Identity, mount a service account key and enable credential_file:
+          # volumeMounts:
+          #   - name: cloudsql-instance-credentials
+          #     mountPath: /secrets/cloudsql
+          #     readOnly: true
+          # args: ["-instances=${DB_CONNECTION_NAME}=tcp:5432","-credential_file=/secrets/cloudsql/credentials.json"]
+      # volumes:
+      #   - name: cloudsql-instance-credentials
+      #     secret:
+      #       secretName: cloudsql-sa
 ---
 apiVersion: v1
 kind: Service
@@ -63,18 +78,33 @@ spec:
       labels:
         app: payment-service
     spec:
+      serviceAccountName: cloudsql-sa
       containers:
         - name: payment-service
-          image: gcr.io/${PROJECT_ID}/payment-service:${SHORT_SHA}
+          image: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/payment-service:${SHORT_SHA}
           ports:
             - containerPort: 8082
           env:
             - name: SPRING_DATASOURCE_URL
-              value: "jdbc:postgresql://${DB_IP}:5432/${_DB_NAME}"
+              value: "jdbc:postgresql://127.0.0.1:5432/${DB_NAME}"
             - name: SPRING_DATASOURCE_USERNAME
-              value: "${_DB_USER}"
+              value: "${DB_USER}"
             - name: SPRING_DATASOURCE_PASSWORD
-              value: "${_DB_PASS}"
+              value: "${DB_PASS}"
+        - name: cloud-sql-proxy
+          image: gcr.io/cloudsql-docker/gce-proxy:1.33.2
+          command: ["/cloud_sql_proxy"]
+          args: ["-instances=${DB_CONNECTION_NAME}=tcp:5432"]
+          # If you are not using Workload Identity, mount a service account key and enable credential_file:
+          # volumeMounts:
+          #   - name: cloudsql-instance-credentials
+          #     mountPath: /secrets/cloudsql
+          #     readOnly: true
+          # args: ["-instances=${DB_CONNECTION_NAME}=tcp:5432","-credential_file=/secrets/cloudsql/credentials.json"]
+      # volumes:
+      #   - name: cloudsql-instance-credentials
+      #     secret:
+      #       secretName: cloudsql-sa
 ---
 apiVersion: v1
 kind: Service
@@ -105,7 +135,7 @@ spec:
     spec:
       containers:
         - name: order-service
-          image: gcr.io/${PROJECT_ID}/order-service:${SHORT_SHA}
+          image: ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPOSITORY}/order-service:${SHORT_SHA}
           ports:
             - containerPort: 8080
           env:

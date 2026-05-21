@@ -1,29 +1,40 @@
 # Cloud Build configuration for microservices deployment
 steps:
-# 1) Build images
+# 0) Create Artifact Registry repository (idempotent)
+- id: "Create Artifact Registry repository"
+  name: 'gcr.io/cloud-builders/gcloud'
+  entrypoint: 'bash'
+  args:
+  - '-c'
+  - |
+    set -e
+    echo "Creating Artifact Registry repository ${_REPOSITORY} in region ${_REGION}..."
+    gcloud artifacts repositories create "${_REPOSITORY}" --repository-format=docker --location="${_REGION}" --quiet || echo "repository may already exist"
+
+# 1) Build and push images to Artifact Registry
 - id: "Build order-service image"
   name: 'gcr.io/cloud-builders/docker'
-  args: ['build', '-t', 'gcr.io/$PROJECT_ID/order-service:$SHORT_SHA', './order-service']
+  args: ['build', '-t', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/order-service:$SHORT_SHA', './order-service']
 
 - id: "Push order-service image"
   name: 'gcr.io/cloud-builders/docker'
-  args: ['push', 'gcr.io/$PROJECT_ID/order-service:$SHORT_SHA']
+  args: ['push', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/order-service:$SHORT_SHA']
 
 - id: "Build fraud-service image"
   name: 'gcr.io/cloud-builders/docker'
-  args: ['build', '-t', 'gcr.io/$PROJECT_ID/fraud-service:$SHORT_SHA', './fraud-service']
+  args: ['build', '-t', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/fraud-service:$SHORT_SHA', './fraud-service']
 
 - id: "Push fraud-service image"
   name: 'gcr.io/cloud-builders/docker'
-  args: ['push', 'gcr.io/$PROJECT_ID/fraud-service:$SHORT_SHA']
+  args: ['push', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/fraud-service:$SHORT_SHA']
 
 - id: "Build payment-service image"
   name: 'gcr.io/cloud-builders/docker'
-  args: ['build', '-t', 'gcr.io/$PROJECT_ID/payment-service:$SHORT_SHA', './payment-service']
+  args: ['build', '-t', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/payment-service:$SHORT_SHA', './payment-service']
 
 - id: "Push payment-service image"
   name: 'gcr.io/cloud-builders/docker'
-  args: ['push', 'gcr.io/$PROJECT_ID/payment-service:$SHORT_SHA']
+  args: ['push', '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/payment-service:$SHORT_SHA']
 
 # 2) Create GKE cluster
 - id: "Create GKE cluster"
@@ -63,36 +74,38 @@ steps:
   - '-c'
   - |
     set -e
-    echo "Resolving Cloud SQL IP (supports optional substitution _DB_IP)..."
-    # If caller passed an explicit substitution '_DB_IP' use it, otherwise query instance
-    if [ -n "${_DB_IP}" ]; then
-      DB_IP="${_DB_IP}"
-      echo "Using DB IP from substitution _DB_IP: $DB_IP"
+    echo "Resolving Cloud SQL instance connection name (supports optional substitution _DB_CONNECTION_NAME)..."
+    # If caller provided `_DB_CONNECTION_NAME`, prefer it; otherwise look up the instance connectionName
+    if [ -n "${_DB_CONNECTION_NAME}" ]; then
+      DB_CONNECTION_NAME="${_DB_CONNECTION_NAME}"
+      echo "Using DB connection name from substitution _DB_CONNECTION_NAME: $DB_CONNECTION_NAME"
     else
-      DB_IP=$(gcloud sql instances describe "${_DB_INSTANCE}" --format='value(ipAddresses[0].ipAddress)')
-      if [ -z "$DB_IP" ]; then
-        echo "Could not determine DB IP. Ensure Cloud SQL has a public IP or adjust connectivity setup." >&2
+      DB_CONNECTION_NAME=$(gcloud sql instances describe "${_DB_INSTANCE}" --format='value(connectionName)')
+      if [ -z "$DB_CONNECTION_NAME" ]; then
+        echo "Could not determine Cloud SQL instance connection name; ensure instance exists or pass _DB_CONNECTION_NAME substitution." >&2
         exit 1
       fi
-      echo "Cloud SQL IP (looked up): $DB_IP"
+      echo "Cloud SQL connection name (looked up): $DB_CONNECTION_NAME"
     fi
 
     # create k8s secret with DB connection details
     kubectl create secret generic db-credentials \
-      --from-literal=DB_HOST="$DB_IP" \
+      --from-literal=DB_CONNECTION_NAME="$DB_CONNECTION_NAME" \
       --from-literal=DB_NAME="${_DB_NAME}" \
       --from-literal=DB_USER="${_DB_USER}" \
       --from-literal=DB_PASS="${_DB_PASS}" \
       --dry-run=client -o yaml | kubectl apply -f -
 
     # Render k8s manifest from template (k8s/k8s-deploy-template.yaml) using envsubst
-    export DB_IP
-    # Export Cloud Build substitutions into plain env var names used by the template
+    # Export variables for the template. Template expects DB_CONNECTION_NAME (Cloud SQL instance), not a raw IP.
+    export DB_CONNECTION_NAME
     export PROJECT_ID="$PROJECT_ID"
     export SHORT_SHA="$SHORT_SHA"
     export DB_NAME="${_DB_NAME}"
     export DB_USER="${_DB_USER}"
     export DB_PASS="${_DB_PASS}"
+    export _REGION="${_REGION}"
+    export _REPOSITORY="${_REPOSITORY}"
     # Render template
     envsubst < k8s/k8s-deploy-template.yaml > k8s-deploy.yaml
 
@@ -117,11 +130,13 @@ steps:
     done
 
 images:
-- 'gcr.io/$PROJECT_ID/order-service:$SHORT_SHA'
-- 'gcr.io/$PROJECT_ID/fraud-service:$SHORT_SHA'
-- 'gcr.io/$PROJECT_ID/payment-service:$SHORT_SHA'
+- '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/order-service:$SHORT_SHA'
+- '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/fraud-service:$SHORT_SHA'
+- '${_REGION}-docker.pkg.dev/$PROJECT_ID/${_REPOSITORY}/payment-service:$SHORT_SHA'
 
 substitutions:
+  _REGION: "us-central1"
+  _REPOSITORY: "microservices-repo"
   _CLUSTER_NAME: "cb-cluster"
   _CLUSTER_ZONE: "us-central1-a"
   _DB_INSTANCE: "cb-sql-instance"
@@ -130,6 +145,7 @@ substitutions:
   _DB_USER: "postgres"
   _DB_PASS: "123"
   _DB_IP: ""
+  _DB_CONNECTION_NAME: ""
 
 options:
   substitutionOption: ALLOW_LOOSE
