@@ -88,7 +88,24 @@ steps:
         gcloud container clusters describe "${_CLUSTER_NAME}" --zone "${_CLUSTER_ZONE}" >/dev/null 2>&1 || \
           gcloud container clusters create "${_CLUSTER_NAME}" --zone "${_CLUSTER_ZONE}" --num-nodes=3 --scopes="https://www.googleapis.com/auth/cloud-platform" --quiet
 
-  # 10) Get credentials, render k8s template and apply in one step (ensures kubeconfig & envsubst availability)
+  # 10) Setup Cloud SQL and Workload Identity
+  - id: "setup-cloudsql"
+    name: 'gcr.io/cloud-builders/gcloud'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -e
+        echo "Getting GKE credentials for cluster ${_CLUSTER_NAME}..."
+        gcloud container clusters get-credentials "${_CLUSTER_NAME}" --zone "${_CLUSTER_ZONE}"
+        
+        echo "Setting up Cloud SQL and Workload Identity..."
+        chmod +x setup-cloudsql.sh
+        # Extract actual connection name from substitution
+        DB_CONNECTION_NAME_ACTUAL=$(echo "${_DB_CONNECTION_NAME}" | sed "s/PROJECT_ID/$PROJECT_ID/g")
+        ./setup-cloudsql.sh "$PROJECT_ID" "${_REGION}" "microservices-db" "${_DB_NAME}" "${_DB_USER}" "${_DB_PASS}" "${_CLUSTER_NAME}" "${_CLUSTER_ZONE}"
+
+  # 11) Get credentials, render k8s template and apply in one step (ensures kubeconfig & envsubst availability)
   - id: "deploy-to-gke"
     name: 'gcr.io/cloud-builders/gcloud'
     entrypoint: 'bash'
@@ -112,7 +129,8 @@ steps:
         export _REPOSITORY="${_REPOSITORY}"
         export _CLUSTER_NAME="${_CLUSTER_NAME}"
         export _CLUSTER_ZONE="${_CLUSTER_ZONE}"
-        export _DB_CONNECTION_NAME="${_DB_CONNECTION_NAME}"
+        # Replace PROJECT_ID placeholder in connection name
+        export _DB_CONNECTION_NAME=$(echo "${_DB_CONNECTION_NAME}" | sed "s/PROJECT_ID/$PROJECT_ID/g")
         export _DB_NAME="${_DB_NAME}"
         export _DB_USER="${_DB_USER}"
         export _DB_PASS="${_DB_PASS}"
@@ -135,6 +153,10 @@ substitutions:
   _REPOSITORY: "microservices-repo"
   _CLUSTER_NAME: "cb-cluster"
   _CLUSTER_ZONE: "us-central1-a"
+  _DB_CONNECTION_NAME: "PROJECT_ID:us-central1:microservices-db"
+  _DB_NAME: "microservices"
+  _DB_USER: "app-user"
+  _DB_PASS: "123"
 
 options:
   substitutionOption: ALLOW_LOOSE
