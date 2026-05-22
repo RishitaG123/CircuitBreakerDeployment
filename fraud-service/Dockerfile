@@ -1,6 +1,7 @@
 FROM eclipse-temurin:21-jdk-jammy
 WORKDIR /app
 
-COPY target/*.jar app.jar
+# Copy already-built JAR from root build output
+COPY fraud-service/target/*.jar app.jar
 
-ENTRYPOINT ["java", "-jar", "app.jar"]
+ENTRYPOINT ["java","-jar","/app/app.jar"]
