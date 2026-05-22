@@ -15,7 +15,7 @@ kind: Deployment
 metadata:
   name: fraud-service
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: fraud-service
@@ -88,7 +88,7 @@ kind: Deployment
 metadata:
   name: payment-service
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: payment-service
@@ -162,7 +162,7 @@ kind: Deployment
 metadata:
   name: order-service
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: order-service
