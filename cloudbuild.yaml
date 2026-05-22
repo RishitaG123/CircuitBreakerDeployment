@@ -156,7 +156,7 @@ substitutions:
   _DB_CONNECTION_NAME: "PROJECT_ID:us-central1:microservices-db"
   _DB_NAME: "microservices"
   _DB_USER: "app-user"
-  _DB_PASS: "123"
+  _DB_PASS: "changeme"
 
 options:
   substitutionOption: ALLOW_LOOSE
