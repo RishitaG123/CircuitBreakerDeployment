@@ -86,7 +86,7 @@ steps:
         echo "Creating or verifying GKE cluster ${_CLUSTER_NAME} in zone ${_CLUSTER_ZONE}..."
         # create cluster if it doesn't exist; tolerate if it already exists
         gcloud container clusters describe "${_CLUSTER_NAME}" --zone "${_CLUSTER_ZONE}" >/dev/null 2>&1 || \
-          gcloud container clusters create "${_CLUSTER_NAME}" --zone "${_CLUSTER_ZONE}" --num-nodes=3 --quiet
+          gcloud container clusters create "${_CLUSTER_NAME}" --zone "${_CLUSTER_ZONE}" --num-nodes=3 --scopes="https://www.googleapis.com/auth/cloud-platform" --quiet
 
   # 10) Get credentials, render k8s template and apply in one step (ensures kubeconfig & envsubst availability)
   - id: "deploy-to-gke"
