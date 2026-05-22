@@ -37,12 +37,12 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: cloudsql-db-credentials
-                  key: username
+                  key: DB_USER
             - name: SPRING_DATASOURCE_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: cloudsql-db-credentials
-                  key: password
+                  key: DB_PASS
           resources:
             requests:
               memory: "256Mi"
@@ -110,12 +110,12 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: cloudsql-db-credentials
-                  key: username
+                  key: DB_USER
             - name: SPRING_DATASOURCE_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: cloudsql-db-credentials
-                  key: password
+                  key: DB_PASS
           resources:
             requests:
               memory: "256Mi"
